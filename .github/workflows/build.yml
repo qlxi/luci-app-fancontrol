@@ -1,4 +1,4 @@
-name: Build luci-app-fancontrol
+name: Build luci-app-fancontrol for GL-AXT1800 (Snapshot)
 
 on:
   push:
@@ -16,7 +16,7 @@ jobs:
       - name: Build package
         uses: openwrt/gh-action-sdk@v5
         env:
-          ARCH: mediatek-filogic-23.05.5
+          ARCH: qualcommax-ipq60xx-snapshot
           PACKAGES: luci-app-fancontrol
           FEEDNAME: fancontrol
 
