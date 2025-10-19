@@ -1,4 +1,4 @@
-name: Build luci-app-fancontrol for GL-AXT1800 (Snapshot)
+name: Build luci-app-fancontrol
 
 on:
   push:
@@ -9,6 +9,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [ aarch64_cortex-a53-24.10-SNAPSHOT ]  # Для 24.10-SNAPSHOT SDK, подходящей для GL-AXT1800
 
     steps:
       - uses: actions/checkout@v4
@@ -16,12 +19,11 @@ jobs:
       - name: Build package
         uses: openwrt/gh-action-sdk@v5
         env:
-          ARCH: qualcommax-ipq60xx-snapshot
-          PACKAGES: luci-app-fancontrol
-          FEEDNAME: fancontrol
+          ARCH: ${{ matrix.arch }}
 
-      - name: Upload package
+      - name: Upload packages
         uses: actions/upload-artifact@v4
         with:
-          name: ipk
-          path: bin/packages/*/*/*.ipk
+          name: packages-${{ matrix.arch }}
+          path: bin/packages/${{ matrix.arch }}/*/*.ipk
+          retention-days: 7
