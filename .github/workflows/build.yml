@@ -2,55 +2,26 @@ name: Build luci-app-fancontrol
 
 on:
   push:
+    branches: [ main ]
   pull_request:
-  workflow_dispatch:
+    branches: [ main ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set variables
-        run: |
-          echo "SDK_URL=https://downloads.openwrt.org/releases/23.05.3/targets/ipq807x/generic/openwrt-sdk-23.05.3-ipq807x-generic_gcc-12.3.0_musl_eabi.Linux-x86_64.tar.xz" >> $GITHUB_ENV
-          echo "FEED_NAME=luci" >> $GITHUB_ENV
-          echo "PKG_NAME=luci-app-fancontrol" >> $GITHUB_ENV
+      - name: Build package
+        uses: openwrt/gh-action-sdk@v5
+        env:
+          ARCH: mediatek-filogic-23.05.5
+          PACKAGES: luci-app-fancontrol
+          FEEDNAME: fancontrol
 
-      - name: Download and extract OpenWrt SDK
-        run: |
-          mkdir sdk
-          cd sdk
-          wget -q $SDK_URL -O sdk.tar.xz
-          tar -xf sdk.tar.xz --strip-components=1
-
-      - name: Prepare feeds
-        working-directory: sdk
-        run: |
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
-
-      - name: Copy luci-app-fancontrol to SDK
-        run: |
-          mkdir -p sdk/package/$PKG_NAME
-          cp -r * sdk/package/$PKG_NAME
-
-      - name: Configure package
-        working-directory: sdk
-        run: |
-          echo "CONFIG_PACKAGE_${PKG_NAME}=m" >> .config
-          make defconfig
-
-      - name: Build luci-app-fancontrol
-        working-directory: sdk
-        run: |
-          make package/$PKG_NAME/compile V=s
-
-      - name: Upload compiled package
+      - name: Upload package
         uses: actions/upload-artifact@v4
         with:
-          name: luci-app-fancontrol-ipk
-          path: |
-            sdk/bin/packages/**/luci/luci-app-fancontrol*.ipk
+          name: ipk
+          path: bin/packages/*/*/*.ipk
