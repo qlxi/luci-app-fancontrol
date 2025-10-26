@@ -12,6 +12,8 @@ jobs:
     steps:
       - name: Checkout luci-app-fancontrol source
         uses: actions/checkout@v4
+        with:
+          path: fancontrol
 
       - name: Install dependencies
         run: |
@@ -29,7 +31,7 @@ jobs:
 
       - name: Add luci-app-fancontrol package
         run: |
-          cp -r $GITHUB_WORKSPACE openwrt/package/luci-app-fancontrol
+          cp -r fancontrol openwrt/package/luci-app-fancontrol
 
       - name: Configure target for GL.iNet AXT1800 (ipq60xx)
         run: |
