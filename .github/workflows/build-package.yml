@@ -51,7 +51,7 @@ jobs:
           path: |
             openwrt-sdk
             ~/.cache/openwrt
-          key: ${{ runner.os }}-sdk-${{ env.TARGET }}-${{ env.SUBTARGET }}-${{ hashFiles('**/Makefile') }}-v5
+          key: ${{ runner.os }}-sdk-${{ env.TARGET }}-${{ env.SUBTARGET }}-${{ hashFiles('luci-app-fancontrol/Makefile') }}-v6
           restore-keys: |
             ${{ runner.os }}-sdk-${{ env.TARGET }}-${{ env.SUBTARGET }}-
             ${{ runner.os }}-sdk-
@@ -79,19 +79,16 @@ jobs:
 
       - name: Integrate package
         run: |
-          # Убедимся что мы в корневой директории
-          cd ${{ github.workspace }}
-          echo "Current directory: $(pwd)"
-          echo "Contents:"
-          ls -la
+          echo "📦 Package source structure:"
+          ls -la luci-app-fancontrol/
           
-          # Копируем из текущей директории в SDK
+          # Копируем только папку с пакетом
           rm -rf openwrt-sdk/package/${{ env.PACKAGE_NAME }}
-          cp -r . openwrt-sdk/package/${{ env.PACKAGE_NAME }}
+          cp -r luci-app-fancontrol openwrt-sdk/package/${{ env.PACKAGE_NAME }}
           
+          echo "✅ Package integrated into SDK"
           echo "📦 Package structure in SDK:"
           ls -la openwrt-sdk/package/${{ env.PACKAGE_NAME }}/
-          echo "✅ Package integrated into SDK"
 
       - name: Configure build
         run: |
