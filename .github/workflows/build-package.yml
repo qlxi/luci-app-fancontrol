@@ -19,39 +19,75 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt update
-          sudo apt install -y build-essential git python3 python3-setuptools unzip wget zlib1g-dev zstd
+          sudo apt install -y build-essential git python3 python3-setuptools unzip wget zlib1g-dev zstd ccache
 
-      - name: Download and extract OpenWrt SDK (ipq60xx snapshot)
+      - name: Download OpenWrt SDK (ipq60xx snapshot)
         env:
           SDK_URL: https://downloads.openwrt.org/snapshots/targets/qualcommax/ipq60xx/openwrt-sdk-qualcommax-ipq60xx_gcc-14.3.0_musl.Linux-x86_64.tar.zst
-          SDK_DIR: openwrt-sdk
+          SDK_FILE: openwrt-sdk-qualcommax-ipq60xx_gcc-14.3.0_musl.Linux-x86_64.tar.zst
         run: |
-          wget -q "$SDK_URL"
-          tar --use-compress-program=zstd -xf "$(basename "$SDK_URL")"
-          mv "$(basename "$SDK_URL" .tar.zst)" "$SDK_DIR"
+          wget -q "$SDK_URL" -O "$SDK_FILE"
 
-      - name: Prepare SDK feeds
-        working-directory: openwrt-sdk
+      - name: Compute SDK hash
         run: |
+          SDK_HASH=$(sha256sum "$SDK_FILE" | awk '{print $1}')
+          echo "SDK_HASH=$SDK_HASH" >> $GITHUB_ENV
+
+      - name: Restore SDK cache
+        uses: actions/cache/restore@v4
+        id: sdk-cache
+        with:
+          path: openwrt-sdk
+          key: ${{ runner.os }}-sdk-${{ env.SDK_HASH }}
+
+      - name: Setup SDK if not cached
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          tar --use-compress-program=zstd -xf "$SDK_FILE"
+          mv "$(basename "$SDK_FILE" .tar.zst)" openwrt-sdk
+          cd openwrt-sdk
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
+      - name: Save SDK cache
+        uses: actions/cache/save@v4
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        with:
+          path: openwrt-sdk
+          key: ${{ runner.os }}-sdk-${{ env.SDK_HASH }}
+
+      - name: Restore downloads cache
+        uses: actions/cache@v4
+        with:
+          path: openwrt-sdk/dl
+          key: ${{ runner.os }}-dl-ipq60xx
+          restore-keys: ${{ runner.os }}-dl-
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: openwrt-sdk/.ccache
+          key: ${{ runner.os }}-ccache-ipq60xx
+          restore-keys: ${{ runner.os }}-ccache-
+
       - name: Add luci-app-fancontrol to SDK
         run: |
+          rm -rf openwrt-sdk/package/luci-app-fancontrol
           cp -r fancontrol openwrt-sdk/package/luci-app-fancontrol
           cd openwrt-sdk
           echo "CONFIG_PACKAGE_luci-app-fancontrol=y" >> .config
+          echo "CONFIG_CCACHE=y" >> .config
           make defconfig
 
       - name: Build luci-app-fancontrol
         working-directory: openwrt-sdk
-        run: make package/luci-app-fancontrol/compile V=s -j$(nproc)
+        run: make package/luci-app-fancontrol/install V=s -j$(nproc)
 
       - name: Find built .ipk
         id: findipk
         working-directory: openwrt-sdk
         run: |
-          IPK_PATH=$(find bin/packages -name "luci-app-fancontrol*.ipk" -print -quit)
+          IPK_PATH=$(find bin -name "luci-app-fancontrol*.ipk" -print -quit)
           if [ -z "$IPK_PATH" ]; then
             echo "Error: .ipk file not found" >&2
             exit 1
