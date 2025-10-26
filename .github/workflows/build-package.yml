@@ -1,9 +1,8 @@
-name: Build luci-app-fancontrol for GL-AXT1800 using LiBwrt-op
+name: Build luci-app-fancontrol on LiBwrt-OpenWrt6.x for AXT1800
 
 on:
   push:
-    branches:
-      - main
+  pull_request:
   workflow_dispatch:
 
 jobs:
@@ -11,38 +10,53 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository (package source)
+      - name: Checkout luci-app-fancontrol
         uses: actions/checkout@v4
+        with:
+          path: fancontrol
 
-      - name: Install build dependencies
+      - name: Clone LiBwrt openwrt-6.x
         run: |
-          sudo apt-get update
-          sudo apt-get -y install ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev libltdl-dev libncurses5-dev libreadline-dev libssl-dev libtool lrzsz mkisofs msmtp ninja-build patch pkgconf python3 python3-pyelftools python3-setuptools python3-docutils qemu-utils rsync scons squashfs-tools subversion swig texinfo texlive uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
-
-      - name: Clone LiBwrt-op OpenWrt source
-        run: |
-          git clone --depth 1 --single-branch -b k6.12-nss https://github.com/LiBwrt-op/openwrt-6.x.git openwrt
+          git clone https://github.com/LiBwrt/openwrt-6.x.git openwrt
           cd openwrt
+          # Можно переключить на нужный коммит, если нужно стабильность
+          # git checkout <commit_hash>
 
-      - name: Update feeds and add custom package
-        working-directory: openwrt
+      - name: Install dependencies
         run: |
-          echo "src-link custom ${{ github.workspace }}" >> feeds.conf.default
+          sudo apt update
+          sudo apt install -y build-essential ccache ecj fastjar file g++ gawk \
+            gettext git-core libncurses5-dev libssl-dev python3 python3-distutils \
+            unzip wget zlib1g-dev
+
+      - name: Prepare feeds & custom package
+        run: |
+          cd openwrt
           ./scripts/feeds update -a
-          ./scripts/feeds install -a -p custom
+          ./scripts/feeds install -a
+          cd package
+          mkdir -p custom
+          # копируем в custom
+          cp -r $GITHUB_WORKSPACE/fancontrol ./custom/luci-app-fancontrol
 
-      - name: Prepare config
-        working-directory: openwrt
-        run: make defconfig
-
-      - name: Compile package
-        working-directory: openwrt
+      - name: Configure for AXT1800
         run: |
-          make download -j$(nproc)
-          make package/luci-app-fancontrol/compile V=s -j$(nproc)
+          cd openwrt
+          # Устанавливаем конфигурацию таргета
+          echo "CONFIG_TARGET_ipq60xx=y" >> .config
+          echo "CONFIG_TARGET_ipq60xx_generic=y" >> .config
+          echo "CONFIG_TARGET_ipq60xx_generic_DEVICE_glinet_axt1800=y" >> .config
+          # Включаем наш пакет
+          echo "CONFIG_PACKAGE_luci-app-fancontrol=y" >> .config
+          make defconfig
+
+      - name: Build luci-app-fancontrol
+        run: |
+          cd openwrt
+          make package/custom/luci-app-fancontrol/compile V=s -j$(nproc)
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: luci-app-fancontrol-ipk
-          path: openwrt/bin/packages/aarch64_cortex-a53/custom/*.ipk
+          path: openwrt/bin/packages/*/base/luci-app-fancontrol*.ipk
