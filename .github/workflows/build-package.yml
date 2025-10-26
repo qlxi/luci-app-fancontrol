@@ -13,7 +13,8 @@ jobs:
     
     strategy:
       matrix:
-        cache-key: [ ${{ github.event_name == 'push' && 'push' || 'other' }} ]
+        # Упростил кэширование - убрал сложную логику
+        cache-key: [default]
 
     steps:
       - name: Checkout luci-app-fancontrol
@@ -23,28 +24,26 @@ jobs:
 
       - name: Cache OpenWrt SDK
         uses: actions/cache@v4
+        id: cache-sdk
         with:
           path: openwrt-sdk
-          key: ${{ runner.os }}-sdk-${{ hashFiles('fancontrol/Makefile') }}-${{ matrix.cache-key }}
+          key: ${{ runner.os }}-sdk-${{ hashFiles('fancontrol/Makefile') }}-v1
           restore-keys: |
             ${{ runner.os }}-sdk-${{ hashFiles('fancontrol/Makefile') }}-
             ${{ runner.os }}-sdk-
 
       - name: Cache build dependencies
         uses: actions/cache@v4
+        id: cache-deps
         with:
           path: |
             ~/.cache/openwrt
-            /var/cache/apt/archives
-          key: ${{ runner.os }}-build-deps-${{ hashFiles('**/Makefile', '**/*.mk') }}
-          restore-keys: |
-            ${{ runner.os }}-build-deps-
+          key: ${{ runner.os }}-build-deps-v1
 
       - name: Install build dependencies
         run: |
           sudo apt update
           sudo apt install -y build-essential git python3 python3-setuptools unzip wget zlib1g-dev zstd
-        if: steps.cache-build-deps.outputs.cache-hit != 'true'
 
       - name: Download OpenWrt SDK (ipq60xx snapshot)
         run: |
@@ -57,7 +56,7 @@ jobs:
       - name: Prepare SDK feeds
         run: |
           cd openwrt-sdk
-          # Обновляем feeds только если нет кэша
+          # Обновляем feeds только если SDK не был закэширован
           if [ ! -f "feeds.updated" ]; then
             ./scripts/feeds update -a
             ./scripts/feeds install -a
