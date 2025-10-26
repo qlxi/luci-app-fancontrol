@@ -3,7 +3,7 @@ name: Build luci-app-fancontrol (IPQ60xx) and Upload Artifact
 on:
   push:
     tags:
-      - 'v*'  # запуск на теги, например v1.0
+      - 'v*'  # Trigger on tags like v1.0
   workflow_dispatch:
 
 jobs:
@@ -11,33 +11,31 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout пакета
       - name: Checkout luci-app-fancontrol
         uses: actions/checkout@v4
         with:
           path: fancontrol
 
-      # 2. Установить зависимости
       - name: Install build dependencies
         run: |
           sudo apt update
           sudo apt install -y build-essential git python3 python3-setuptools unzip wget zlib1g-dev zstd
 
-      # 3. Скачать и распаковать OpenWrt SDK
-      - name: Download OpenWrt SDK (ipq60xx snapshot)
+      - name: Download and extract OpenWrt SDK (ipq60xx snapshot)
+        env:
+          SDK_URL: https://downloads.openwrt.org/snapshots/targets/qualcommax/ipq60xx/openwrt-sdk-qualcommax-ipq60xx_gcc-14.3.0_musl.Linux-x86_64.tar.zst
+          SDK_DIR: openwrt-sdk
         run: |
-          wget -q https://downloads.openwrt.org/snapshots/targets/qualcommax/ipq60xx/openwrt-sdk-qualcommax-ipq60xx_gcc-14.3.0_musl.Linux-x86_64.tar.zst
-          tar --use-compress-program=zstd -xf openwrt-sdk-qualcommax-ipq60xx_gcc-14.3.0_musl.Linux-x86_64.tar.zst
-          mv openwrt-sdk-qualcommax-ipq60xx_gcc-14.3.0_musl.Linux-x86_64 openwrt-sdk
+          wget -q "$SDK_URL"
+          tar --use-compress-program=zstd -xf "$(basename "$SDK_URL")"
+          mv "$(basename "$SDK_URL" .tar.zst)" "$SDK_DIR"
 
-      # 4. Подготовить feeds
       - name: Prepare SDK feeds
+        working-directory: openwrt-sdk
         run: |
-          cd openwrt-sdk
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      # 5. Добавить пакет luci-app-fancontrol
       - name: Add luci-app-fancontrol to SDK
         run: |
           cp -r fancontrol openwrt-sdk/package/luci-app-fancontrol
@@ -45,23 +43,24 @@ jobs:
           echo "CONFIG_PACKAGE_luci-app-fancontrol=y" >> .config
           make defconfig
 
-      # 6. Собрать пакет
       - name: Build luci-app-fancontrol
-        run: |
-          cd openwrt-sdk
-          make package/luci-app-fancontrol/compile V=s -j$(nproc)
+        working-directory: openwrt-sdk
+        run: make package/luci-app-fancontrol/compile V=s -j$(nproc)
 
-      # 7. Найти собранный .ipk
       - name: Find built .ipk
         id: findipk
+        working-directory: openwrt-sdk
         run: |
-          cd openwrt-sdk
-          IPK_PATH=$(find bin/targets/ipq60xx/generic/packages/base/ -name "luci-app-fancontrol*.ipk")
+          IPK_PATH=$(find bin/packages -name "luci-app-fancontrol*.ipk" -print -quit)
+          if [ -z "$IPK_PATH" ]; then
+            echo "Error: .ipk file not found" >&2
+            exit 1
+          fi
           echo "IPK_PATH=$IPK_PATH" >> $GITHUB_ENV
 
-      # 8. Загрузить .ipk как артефакт Actions
       - name: Upload .ipk as artifact
         uses: actions/upload-artifact@v4
         with:
           name: luci-app-fancontrol-ipk
           path: ${{ env.IPK_PATH }}
+          retention-days: 30
