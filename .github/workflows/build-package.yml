@@ -40,7 +40,7 @@ jobs:
       # 5. Добавить пакет luci-app-fancontrol
       - name: Add luci-app-fancontrol to SDK
         run: |
-          cp -r ../fancontrol openwrt-sdk/package/luci-app-fancontrol
+          cp -r fancontrol openwrt-sdk/package/luci-app-fancontrol
           cd openwrt-sdk
           echo "CONFIG_PACKAGE_luci-app-fancontrol=y" >> .config
           make defconfig
