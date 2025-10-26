@@ -1,4 +1,4 @@
-name: Build luci-app-fancontrol for GL-AXT1800
+name: Build luci-app-fancontrol for GL-AXT1800 using LiBwrt-op
 
 on:
   push:
@@ -11,37 +11,38 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout repository (package source)
         uses: actions/checkout@v4
 
-      - name: Install zstd
+      - name: Install build dependencies
         run: |
-          sudo apt update
-          sudo apt install -y zstd
+          sudo apt-get update
+          sudo apt-get -y install ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev libltdl-dev libncurses5-dev libreadline-dev libssl-dev libtool lrzsz mkisofs msmtp ninja-build patch pkgconf python3 python3-pyelftools python3-setuptools python3-docutils qemu-utils rsync scons squashfs-tools subversion swig texinfo texlive uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
 
-      - name: Download OpenWrt SDK
+      - name: Clone LiBwrt-op OpenWrt source
         run: |
-          SDK_URL="https://downloads.openwrt.org/snapshots/targets/qualcommax/ipq60xx/openwrt-sdk-qualcommax-ipq60xx_gcc-14.3.0_musl.Linux-x86_64.tar.zst"
-          wget $SDK_URL
-          tar --zstd -xvf openwrt-sdk-*.tar.zst
-          mv openwrt-sdk-* sdk
-          cd sdk
+          git clone --depth 1 --single-branch -b k6.12-nss https://github.com/LiBwrt-op/openwrt-6.x.git openwrt
+          cd openwrt
 
       - name: Update feeds and add custom package
-        working-directory: sdk
+        working-directory: openwrt
         run: |
           echo "src-link custom ${{ github.workspace }}" >> feeds.conf.default
           ./scripts/feeds update -a
           ./scripts/feeds install -a -p custom
 
+      - name: Prepare config
+        working-directory: openwrt
+        run: make defconfig
+
       - name: Compile package
-        working-directory: sdk
+        working-directory: openwrt
         run: |
-          make defconfig
+          make download -j$(nproc)
           make package/luci-app-fancontrol/compile V=s -j$(nproc)
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: luci-app-fancontrol-ipk
-          path: sdk/bin/packages/aarch64_cortex-a53/custom/*.ipk
+          path: openwrt/bin/packages/aarch64_cortex-a53/custom/*.ipk
