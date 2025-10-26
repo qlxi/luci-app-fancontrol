@@ -1,4 +1,4 @@
-name: Build luci-app-fancontrol for AXT1800 (ipq60xx, LiBwrt-OpenWrt6.x)
+name: Build luci-app-fancontrol with SDK (ipq60xx, GL.iNet AXT1800)
 
 on:
   push:
@@ -10,51 +10,42 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout luci-app-fancontrol source
+      - name: Checkout luci-app-fancontrol
         uses: actions/checkout@v4
         with:
           path: fancontrol
 
-      - name: Install dependencies
+      - name: Install build dependencies
         run: |
           sudo apt update
-          sudo apt install -y build-essential ccache ecj fastjar file g++ gawk \
-            gettext git-core libncurses5-dev libssl-dev python3 python3-setuptools \
-            unzip wget zlib1g-dev
+          sudo apt install -y build-essential git python3 python3-setuptools unzip wget zlib1g-dev
 
-      - name: Clone LiBwrt OpenWrt 6.x
+      - name: Download OpenWrt SDK (LiBwrt-6.x ipq60xx)
         run: |
-          git clone https://github.com/LiBwrt-op/openwrt-6.x.git openwrt
-          cd openwrt
+          # Пример ссылки на SDK — ты можешь заменить на свою, если используешь конкретный релиз
+          wget -q https://downloads.openwrt.org/releases/23.05.3/targets/ipq60xx/generic/openwrt-sdk-23.05.3-ipq60xx-generic_gcc-12.3.0_musl.Linux-x86_64.tar.xz
+          tar -xf openwrt-sdk-*.tar.xz
+          mv openwrt-sdk-* openwrt-sdk
+
+      - name: Prepare SDK feeds
+        run: |
+          cd openwrt-sdk
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Add luci-app-fancontrol package
+      - name: Add luci-app-fancontrol to SDK
         run: |
-          cp -r fancontrol openwrt/package/luci-app-fancontrol
-
-      - name: Configure target for GL.iNet AXT1800 (ipq60xx)
-        run: |
-          cd openwrt
-          echo "CONFIG_TARGET_ipq60xx=y" >> .config
-          echo "CONFIG_TARGET_ipq60xx_generic=y" >> .config
-          echo "CONFIG_TARGET_ipq60xx_generic_DEVICE_glinet_axt1800=y" >> .config
+          cp -r ../fancontrol package/luci-app-fancontrol
           echo "CONFIG_PACKAGE_luci-app-fancontrol=y" >> .config
           make defconfig
 
-      - name: Build host tools and toolchain
-        run: |
-          cd openwrt
-          make tools/install -j$(nproc)
-          make toolchain/install -j$(nproc)
-
       - name: Build luci-app-fancontrol
         run: |
-          cd openwrt
+          cd openwrt-sdk
           make package/luci-app-fancontrol/compile V=s -j$(nproc)
 
-      - name: Upload built package
+      - name: Upload .ipk
         uses: actions/upload-artifact@v4
         with:
           name: luci-app-fancontrol-ipk
-          path: openwrt/bin/packages/*/base/luci-app-fancontrol*.ipk
+          path: openwrt-sdk/bin/packages/*/base/luci-app-fancontrol*.ipk
