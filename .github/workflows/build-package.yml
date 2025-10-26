@@ -1,4 +1,4 @@
-name: Build luci-app-fancontrol with SDK (ipq60xx, GL.iNet AXT1800)
+name: Build luci-app-fancontrol with SDK (ipq60xx snapshot)
 
 on:
   push:
@@ -18,12 +18,12 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt update
-          sudo apt install -y build-essential git python3 python3-setuptools unzip wget zlib1g-dev
+          sudo apt install -y build-essential git python3 python3-setuptools unzip wget zlib1g-dev zstd
 
-      - name: Download OpenWrt SDK (LiBwrt-6.x ipq60xx)
+      - name: Download OpenWrt SDK (ipq60xx snapshot)
         run: |
           wget -q https://downloads.openwrt.org/snapshots/targets/qualcommax/ipq60xx/openwrt-sdk-qualcommax-ipq60xx_gcc-14.3.0_musl.Linux-x86_64.tar.zst
-          tar -xf openwrt-sdk-*.tar.xz
+          tar --use-compress-program=zstd -xf openwrt-sdk-*.tar.zst
           mv openwrt-sdk-* openwrt-sdk
 
       - name: Prepare SDK feeds
@@ -34,7 +34,8 @@ jobs:
 
       - name: Add luci-app-fancontrol to SDK
         run: |
-          cp -r ../fancontrol package/luci-app-fancontrol
+          cp -r fancontrol openwrt-sdk/package/luci-app-fancontrol
+          cd openwrt-sdk
           echo "CONFIG_PACKAGE_luci-app-fancontrol=y" >> .config
           make defconfig
 
