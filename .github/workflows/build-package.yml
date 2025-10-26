@@ -42,6 +42,12 @@ jobs:
           echo "CONFIG_PACKAGE_luci-app-fancontrol=y" >> .config
           make defconfig
 
+      - name: Build host tools and toolchain
+        run: |
+          cd openwrt
+          make tools/install -j$(nproc)
+          make toolchain/install -j$(nproc)
+
       - name: Build luci-app-fancontrol
         run: |
           cd openwrt
