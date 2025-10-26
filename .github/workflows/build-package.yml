@@ -1,0 +1,42 @@
+name: Build luci-app-fancontrol for GL-AXT1800
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download OpenWrt SDK
+        run: |
+          SDK_URL="https://downloads.openwrt.org/releases/24.10.4/targets/qualcommax/ipq60xx/openwrt-sdk-24.10.4-qualcommax-ipq60xx_gcc-13.3.0_musl.Linux-x86_64.tar.xz"
+          wget $SDK_URL
+          tar -xJf openwrt-sdk-*.tar.xz
+          mv openwrt-sdk-* sdk
+          cd sdk
+
+      - name: Update feeds and add custom package
+        working-directory: sdk
+        run: |
+          echo "src-link custom ${{ github.workspace }}" >> feeds.conf.default
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a -p custom
+
+      - name: Compile package
+        working-directory: sdk
+        run: |
+          make defconfig
+          make package/luci-app-fancontrol/compile V=s -j$(nproc)
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: luci-app-fancontrol-ipk
+          path: sdk/bin/packages/aarch64_cortex-a53/custom/*.ipk
