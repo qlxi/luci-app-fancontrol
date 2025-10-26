@@ -10,11 +10,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    
-    strategy:
-      matrix:
-        # Упростил кэширование - убрал сложную логику
-        cache-key: [default]
 
     steps:
       - name: Checkout luci-app-fancontrol
@@ -28,17 +23,6 @@ jobs:
         with:
           path: openwrt-sdk
           key: ${{ runner.os }}-sdk-${{ hashFiles('fancontrol/Makefile') }}-v1
-          restore-keys: |
-            ${{ runner.os }}-sdk-${{ hashFiles('fancontrol/Makefile') }}-
-            ${{ runner.os }}-sdk-
-
-      - name: Cache build dependencies
-        uses: actions/cache@v4
-        id: cache-deps
-        with:
-          path: |
-            ~/.cache/openwrt
-          key: ${{ runner.os }}-build-deps-v1
 
       - name: Install build dependencies
         run: |
@@ -46,17 +30,15 @@ jobs:
           sudo apt install -y build-essential git python3 python3-setuptools unzip wget zlib1g-dev zstd
 
       - name: Download OpenWrt SDK (ipq60xx snapshot)
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
         run: |
-          if [ ! -d "openwrt-sdk" ]; then
-            wget -q https://downloads.openwrt.org/snapshots/targets/qualcommax/ipq60xx/openwrt-sdk-qualcommax-ipq60xx_gcc-14.3.0_musl.Linux-x86_64.tar.zst
-            tar --use-compress-program=zstd -xf openwrt-sdk-qualcommax-ipq60xx_gcc-14.3.0_musl.Linux-x86_64.tar.zst
-            mv openwrt-sdk-qualcommax-ipq60xx_gcc-14.3.0_musl.Linux-x86_64 openwrt-sdk
-          fi
+          wget -q https://downloads.openwrt.org/snapshots/targets/qualcommax/ipq60xx/openwrt-sdk-qualcommax-ipq60xx_gcc-14.3.0_musl.Linux-x86_64.tar.zst
+          tar --use-compress-program=zstd -xf openwrt-sdk-qualcommax-ipq60xx_gcc-14.3.0_musl.Linux-x86_64.tar.zst
+          mv openwrt-sdk-qualcommax-ipq60xx_gcc-14.3.0_musl.Linux-x86_64 openwrt-sdk
 
       - name: Prepare SDK feeds
         run: |
           cd openwrt-sdk
-          # Обновляем feeds только если SDK не был закэширован
           if [ ! -f "feeds.updated" ]; then
             ./scripts/feeds update -a
             ./scripts/feeds install -a
@@ -73,24 +55,38 @@ jobs:
       - name: Build luci-app-fancontrol (optimized)
         run: |
           cd openwrt-sdk
-          # Используем параллельную компиляцию и уменьшаем вывод
           make package/luci-app-fancontrol/compile -j$(nproc)
 
       - name: Find compiled .ipk file
         id: find-ipk
         run: |
           cd openwrt-sdk
-          IPK_FILE=$(find bin/packages -name "luci-app-fancontrol*.ipk" -type f | head -1)
-          echo "ipk_file=$IPK_FILE" >> $GITHUB_OUTPUT
+          # Ищем IPK файл более точно
+          IPK_FILE=$(find bin -name "luci-app-fancontrol*.ipk" -type f | head -1)
+          if [ -z "$IPK_FILE" ]; then
+            echo "IPK file not found! Searching in all directories..."
+            find . -name "*.ipk" -type f | head -10
+            exit 1
+          fi
           echo "Found IPK: $IPK_FILE"
+          echo "ipk_file=$IPK_FILE" >> $GITHUB_OUTPUT
+          # Сохраняем полный путь для использования в следующих шагах
+          echo "ipk_path=openwrt-sdk/$IPK_FILE" >> $GITHUB_OUTPUT
+
+      - name: Verify IPK file exists
+        run: |
+          echo "Checking if IPK file exists: ${{ steps.find-ipk.outputs.ipk_path }}"
+          ls -la "${{ steps.find-ipk.outputs.ipk_path }}" || echo "File not found!"
+          pwd
+          ls -la openwrt-sdk/bin/packages/*/base/ || echo "Base directory not found"
 
       - name: Upload to Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: luci-app-fancontrol-ipk
-          path: openwrt-sdk/${{ steps.find-ipk.outputs.ipk_file }}
+          path: ${{ steps.find-ipk.outputs.ipk_path }}
 
-      - name: Create Release
+      - name: Create Release and Upload IPK
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
         uses: softprops/action-gh-release@v1
         with:
@@ -100,4 +96,4 @@ jobs:
           prerelease: false
           generate_release_notes: true
           files: |
-            openwrt-sdk/${{ steps.find-ipk.outputs.ipk_file }}
+            ${{ steps.find-ipk.outputs.ipk_path }}
