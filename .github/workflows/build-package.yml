@@ -23,8 +23,8 @@ jobs:
       - name: Download OpenWrt SDK (ipq60xx snapshot)
         run: |
           wget -q https://downloads.openwrt.org/snapshots/targets/qualcommax/ipq60xx/openwrt-sdk-qualcommax-ipq60xx_gcc-14.3.0_musl.Linux-x86_64.tar.zst
-          tar --use-compress-program=zstd -xf openwrt-sdk-*.tar.zst
-          mv openwrt-sdk-* openwrt-sdk
+          tar --use-compress-program=zstd -xf openwrt-sdk-qualcommax-ipq60xx_gcc-14.3.0_musl.Linux-x86_64.tar.zst
+          mv openwrt-sdk-qualcommax-ipq60xx_gcc-14.3.0_musl.Linux-x86_64 openwrt-sdk
 
       - name: Prepare SDK feeds
         run: |
