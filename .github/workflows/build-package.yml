@@ -22,7 +22,6 @@ jobs:
 
       - name: Download OpenWrt SDK (LiBwrt-6.x ipq60xx)
         run: |
-          # Пример ссылки на SDK — ты можешь заменить на свою, если используешь конкретный релиз
           wget -q https://downloads.openwrt.org/releases/23.05.3/targets/ipq60xx/generic/openwrt-sdk-23.05.3-ipq60xx-generic_gcc-12.3.0_musl.Linux-x86_64.tar.xz
           tar -xf openwrt-sdk-*.tar.xz
           mv openwrt-sdk-* openwrt-sdk
