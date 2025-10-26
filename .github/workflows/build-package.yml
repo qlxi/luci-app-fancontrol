@@ -7,12 +7,19 @@ on:
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
+    inputs:
+      skip_cache:
+        description: 'Skip cache (force fresh build)'
+        required: false
+        default: false
+        type: boolean
 
 env:
-  SDK_URL: https://downloads.openwrt.org/snapshots/targets/qualcommax/ipq60xx/openwrt-sdk-qualcommax-ipq60xx_gcc-14.3.0_musl.Linux-x86_64.tar.zst
   PACKAGE_NAME: luci-app-fancontrol
-  ARCH: qualcommax
+  TARGET: qualcommax
   SUBTARGET: ipq60xx
+  ARCH: aarch64_cortex-a53
+  SDK_URL: https://downloads.openwrt.org/snapshots/targets/qualcommax/ipq60xx/openwrt-sdk-qualcommax-ipq60xx_gcc-14.3.0_musl.Linux-x86_64.tar.zst
 
 jobs:
   build:
@@ -36,71 +43,106 @@ jobs:
             zlib1g-dev \
             zstd
 
+      - name: Cache OpenWrt SDK
+        if: ${{ !inputs.skip_cache }}
+        uses: actions/cache@v4
+        id: sdk-cache
+        with:
+          path: |
+            openwrt-sdk
+            ~/.cache/openwrt
+          key: ${{ runner.os }}-sdk-${{ env.TARGET }}-${{ env.SUBTARGET }}-${{ hashFiles('**/Makefile') }}-v4
+          restore-keys: |
+            ${{ runner.os }}-sdk-${{ env.TARGET }}-${{ env.SUBTARGET }}-
+            ${{ runner.os }}-sdk-
+
       - name: Download and extract SDK
+        if: ${{ inputs.skip_cache || steps.sdk-cache.outputs.cache-hit != 'true' }}
         run: |
-          wget -q ${{ env.SDK_URL }} -O sdk.tar.zst
+          wget -q "${{ env.SDK_URL }}" -O sdk.tar.zst
           tar --use-compress-program=zstd -xf sdk.tar.zst
           mv openwrt-sdk-* openwrt-sdk
           rm -f sdk.tar.zst
+          echo "✅ SDK for ${{ env.TARGET }}/${{ env.SUBTARGET }} downloaded"
 
       - name: Initialize SDK feeds
         run: |
           cd openwrt-sdk
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
-
-      - name: Integrate and build package
-        run: |
-          # Copy package to SDK
-          cp -r ${{ github.workspace }} openwrt-sdk/package/${{ env.PACKAGE_NAME }}
-          
-          cd openwrt-sdk
-          
-          # Configure and build
-          echo "CONFIG_PACKAGE_${{ env.PACKAGE_NAME }}=y" >> .config
-          make defconfig
-          make package/${{ env.PACKAGE_NAME }}/compile -j$(nproc)
-
-      - name: Determine IPK path
-        id: ipk_path
-        run: |
-          cd openwrt-sdk
-          # OpenWrt SDK has predictable structure: bin/packages/<arch>/<subtarget>/base/
-          IPK_DIR="bin/packages/${{ env.ARCH }}/${{ env.SUBTARGET }}/base"
-          IPK_PATTERN="${{ env.PACKAGE_NAME }}_*.ipk"
-          
-          echo "ipk_dir=$IPK_DIR" >> $GITHUB_OUTPUT
-          echo "ipk_pattern=$IPK_PATTERN" >> $GITHUB_OUTPUT
-          
-          # Verify the file exists
-          if [ ! -f "$IPK_DIR/$IPK_PATTERN" ]; then
-            echo "❌ Expected IPK not found in $IPK_DIR/"
-            ls -la "$IPK_DIR/" || echo "Directory doesn't exist"
-            exit 1
+          if [ ! -f .feeds_initialized ] || [ ${{ inputs.skip_cache }} == true ]; then
+            ./scripts/feeds update -a
+            ./scripts/feeds install -a
+            touch .feeds_initialized
+            echo "✅ Feeds updated and installed"
+          else
+            echo "✅ Using cached feeds"
           fi
 
-      - name: Prepare release asset
-        id: prepare_release
+      - name: Integrate package
+        run: |
+          rm -rf openwrt-sdk/package/${{ env.PACKAGE_NAME }}
+          cp -r ${{ github.workspace }} openwrt-sdk/package/${{ env.PACKAGE_NAME }}
+          
+          echo "📦 Package structure:"
+          ls -la openwrt-sdk/package/${{ env.PACKAGE_NAME }}/
+          echo "✅ Package integrated into SDK"
+
+      - name: Configure build
         run: |
           cd openwrt-sdk
-          IPK_DIR="${{ steps.ipk_path.outputs.ipk_dir }}"
-          IPK_FILE=$(ls $IPK_DIR/${{ env.PACKAGE_NAME }}_*.ipk | head -1)
-          IPK_BASENAME=$(basename $IPK_FILE)
+          echo "CONFIG_PACKAGE_${{ env.PACKAGE_NAME }}=y" >> .config
+          make defconfig
           
-          # Copy to predictable location for release
+          echo "⚙️ Build configuration:"
+          grep "CONFIG_PACKAGE_${{ env.PACKAGE_NAME }}" .config || echo "Package not in config"
+          echo "✅ Build configured"
+
+      - name: Build package
+        run: |
+          cd openwrt-sdk
+          echo "🔧 Building ${{ env.PACKAGE_NAME }} for ${{ env.ARCH }}..."
+          make package/${{ env.PACKAGE_NAME }}/compile -j$(nproc)
+          echo "✅ Build completed successfully"
+
+      - name: Locate and verify IPK
+        id: locate_ipk
+        run: |
+          cd openwrt-sdk
+          
+          # Для qualcommax/ipq60xx с aarch64_cortex-a53
+          EXPECTED_PATH="bin/packages/${{ env.ARCH }}/base/${{ env.PACKAGE_NAME }}_*.ipk"
+          
+          echo "🔍 Looking for IPK at: $EXPECTED_PATH"
+          
+          if ! ls $EXPECTED_PATH >/dev/null 2>&1; then
+            echo "❌ IPK not found at expected path"
+            echo "📁 Searching in entire bin directory..."
+            find bin -name "*.ipk" -type f | head -10
+            echo "📂 Available package directories:"
+            find bin/packages -type d | head -15
+            exit 1
+          fi
+          
+          IPK_FILE=$(ls $EXPECTED_PATH | head -1)
+          IPK_BASENAME=$(basename "$IPK_FILE")
+          IPK_SIZE=$(du -h "$IPK_FILE" | cut -f1)
+          
+          # Copy to workspace root for release
           cp "$IPK_FILE" "../$IPK_BASENAME"
           
-          echo "ipk_basename=$IPK_BASENAME" >> $GITHUB_OUTPUT
-          echo "release_path=$IPK_BASENAME" >> $GITHUB_OUTPUT
+          echo "file_name=$IPK_BASENAME" >> $GITHUB_OUTPUT
+          echo "file_path=$IPK_BASENAME" >> $GITHUB_OUTPUT
+          echo "architecture=${{ env.ARCH }}" >> $GITHUB_OUTPUT
+          echo "target=${{ env.TARGET }}-${{ env.SUBTARGET }}" >> $GITHUB_OUTPUT
           
-          echo "📦 Package ready: $IPK_BASENAME"
-          du -h "../$IPK_BASENAME"
+          echo "✅ IPK located: $IPK_BASENAME"
+          echo "📊 Size: $IPK_SIZE"
+          echo "🏷️ Architecture: ${{ env.ARCH }}"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.PACKAGE_NAME }}-${{ github.sha }}
-          path: ${{ steps.prepare_release.outputs.release_path }}
+          name: ${{ env.PACKAGE_NAME }}-${{ env.ARCH }}-${{ github.sha }}
+          path: ${{ steps.locate_ipk.outputs.file_path }}
           retention-days: 7
 
       - name: Create GitHub Release
@@ -108,9 +150,46 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' && format('nightly-{0}', github.sha) || github.ref_name }}
-          name: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' && format('Nightly Build {0}', github.sha) || github.ref_name }}
-          draft: false
+          name: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' && format('Build {0} - {1}', github.sha, env.ARCH) || format('{0} - {1}', github.ref_name, env.ARCH) }}
+          draft: ${{ startsWith(github.ref, 'refs/tags/v') }}
           prerelease: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
           generate_release_notes: true
           files: |
-            ${{ steps.prepare_release.outputs.release_path }}
+            ${{ steps.locate_ipk.outputs.file_path }}
+
+  quality-assurance:
+    runs-on: ubuntu-latest
+    needs: build
+    if: always()
+    
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ${{ env.PACKAGE_NAME }}-${{ env.ARCH }}-*
+          
+      - name: Perform quality checks
+        run: |
+          echo "🏭 Quality Assurance Checks"
+          echo "=========================="
+          
+          IPK_FILE=$(find . -name "*.ipk" | head -1)
+          
+          if [ -z "$IPK_FILE" ]; then
+            echo "❌ No IPK file found for validation"
+            exit 1
+          fi
+          
+          echo "✅ IPK File: $(basename "$IPK_FILE")"
+          echo "📦 File Type: $(file "$IPK_FILE")"
+          echo "💾 Size: $(du -h "$IPK_FILE" | cut -f1)"
+          echo "🔐 MD5: $(md5sum "$IPK_FILE" | cut -d' ' -f1)"
+          echo "📈 SHA256: $(sha256sum "$IPK_FILE" | cut -d' ' -f1)"
+          
+          # Basic file validation
+          if [ ! -s "$IPK_FILE" ]; then
+            echo "❌ ERROR: IPK file is empty or corrupted"
+            exit 1
+          fi
+          
+          echo "🎉 All quality checks passed!"
