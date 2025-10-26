@@ -1,4 +1,4 @@
-name: Build luci-app-fancontrol on LiBwrt-OpenWrt6.x for AXT1800
+name: Build luci-app-fancontrol for AXT1800 (ipq60xx, LiBwrt-OpenWrt6.x)
 
 on:
   push:
@@ -10,17 +10,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout luci-app-fancontrol
+      - name: Checkout luci-app-fancontrol source
         uses: actions/checkout@v4
-        with:
-          path: fancontrol
-
-      - name: Clone LiBwrt openwrt-6.x
-        run: |
-          git clone https://github.com/LiBwrt/openwrt-6.x.git openwrt
-          cd openwrt
-          # Можно переключить на нужный коммит, если нужно стабильность
-          # git checkout <commit_hash>
 
       - name: Install dependencies
         run: |
@@ -29,33 +20,32 @@ jobs:
             gettext git-core libncurses5-dev libssl-dev python3 python3-setuptools \
             unzip wget zlib1g-dev
 
-      - name: Prepare feeds & custom package
+      - name: Clone LiBwrt OpenWrt 6.x
         run: |
+          git clone https://github.com/LiBwrt-op/openwrt-6.x.git openwrt
           cd openwrt
           ./scripts/feeds update -a
           ./scripts/feeds install -a
-          cd package
-          mkdir -p custom
-          # копируем в custom
-          cp -r $GITHUB_WORKSPACE/fancontrol ./custom/luci-app-fancontrol
 
-      - name: Configure for AXT1800
+      - name: Add luci-app-fancontrol package
+        run: |
+          cp -r $GITHUB_WORKSPACE openwrt/package/luci-app-fancontrol
+
+      - name: Configure target for GL.iNet AXT1800 (ipq60xx)
         run: |
           cd openwrt
-          # Устанавливаем конфигурацию таргета
           echo "CONFIG_TARGET_ipq60xx=y" >> .config
           echo "CONFIG_TARGET_ipq60xx_generic=y" >> .config
           echo "CONFIG_TARGET_ipq60xx_generic_DEVICE_glinet_axt1800=y" >> .config
-          # Включаем наш пакет
           echo "CONFIG_PACKAGE_luci-app-fancontrol=y" >> .config
           make defconfig
 
       - name: Build luci-app-fancontrol
         run: |
           cd openwrt
-          make package/custom/luci-app-fancontrol/compile V=s -j$(nproc)
+          make package/luci-app-fancontrol/compile V=s -j$(nproc)
 
-      - name: Upload artifact
+      - name: Upload built package
         uses: actions/upload-artifact@v4
         with:
           name: luci-app-fancontrol-ipk
