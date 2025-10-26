@@ -1,162 +1,67 @@
-name: Build and Release luci-app-fancontrol
+name: Build luci-app-fancontrol (IPQ60xx) and Upload Artifact
 
 on:
   push:
-    branches: [ main, master ]
-    tags: [ 'v*' ]
-  pull_request:
-    branches: [ main, master ]
+    tags:
+      - 'v*'  # запуск на теги, например v1.0
   workflow_dispatch:
-    inputs:
-      skip_cache:
-        description: 'Skip cache (force fresh build)'
-        required: false
-        default: false
-        type: boolean
-
-env:
-  PACKAGE_NAME: luci-app-fancontrol
-  TARGET: qualcommax
-  SUBTARGET: ipq60xx
-  ARCH: aarch64_cortex-a53
-  SDK_URL: https://downloads.openwrt.org/snapshots/targets/qualcommax/ipq60xx/openwrt-sdk-qualcommax-ipq60xx_gcc-14.3.0_musl.Linux-x86_64.tar.zst
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
 
     steps:
-      - name: Checkout repository
+      # 1. Checkout пакета
+      - name: Checkout luci-app-fancontrol
         uses: actions/checkout@v4
-
-      - name: Setup build environment
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            git \
-            python3 \
-            python3-setuptools \
-            unzip \
-            wget \
-            zlib1g-dev \
-            zstd
-
-      - name: Cache OpenWrt SDK
-        if: ${{ !inputs.skip_cache }}
-        uses: actions/cache@v4
-        id: sdk-cache
         with:
-          path: |
-            openwrt-sdk
-            ~/.cache/openwrt
-          key: ${{ runner.os }}-sdk-${{ env.TARGET }}-${{ env.SUBTARGET }}-${{ hashFiles('luci-app-fancontrol/Makefile') }}-v6
-          restore-keys: |
-            ${{ runner.os }}-sdk-${{ env.TARGET }}-${{ env.SUBTARGET }}-
-            ${{ runner.os }}-sdk-
+          path: fancontrol
 
-      - name: Download and extract SDK
-        if: ${{ inputs.skip_cache || steps.sdk-cache.outputs.cache-hit != 'true' }}
+      # 2. Установить зависимости
+      - name: Install build dependencies
         run: |
-          wget -q "${{ env.SDK_URL }}" -O sdk.tar.zst
-          tar --use-compress-program=zstd -xf sdk.tar.zst
-          mv openwrt-sdk-* openwrt-sdk
-          rm -f sdk.tar.zst
-          echo "✅ SDK for ${{ env.TARGET }}/${{ env.SUBTARGET }} downloaded"
+          sudo apt update
+          sudo apt install -y build-essential git python3 python3-setuptools unzip wget zlib1g-dev zstd
 
-      - name: Initialize SDK feeds
+      # 3. Скачать и распаковать OpenWrt SDK
+      - name: Download OpenWrt SDK (ipq60xx snapshot)
         run: |
-          cd openwrt-sdk
-          if [ ! -f .feeds_initialized ] || [ ${{ inputs.skip_cache }} == true ]; then
-            ./scripts/feeds update -a
-            ./scripts/feeds install -a
-            touch .feeds_initialized
-            echo "✅ Feeds updated and installed"
-          else
-            echo "✅ Using cached feeds"
-          fi
+          wget -q https://downloads.openwrt.org/snapshots/targets/qualcommax/ipq60xx/openwrt-sdk-qualcommax-ipq60xx_gcc-14.3.0_musl.Linux-x86_64.tar.zst
+          tar --use-compress-program=zstd -xf openwrt-sdk-qualcommax-ipq60xx_gcc-14.3.0_musl.Linux-x86_64.tar.zst
+          mv openwrt-sdk-qualcommax-ipq60xx_gcc-14.3.0_musl.Linux-x86_64 openwrt-sdk
 
-      - name: Integrate package
-        run: |
-          echo "📦 Package source structure:"
-          ls -la luci-app-fancontrol/
-          
-          # Копируем только папку с пакетом
-          rm -rf openwrt-sdk/package/${{ env.PACKAGE_NAME }}
-          cp -r luci-app-fancontrol openwrt-sdk/package/${{ env.PACKAGE_NAME }}
-          
-          echo "✅ Package integrated into SDK"
-          echo "📦 Package structure in SDK:"
-          ls -la openwrt-sdk/package/${{ env.PACKAGE_NAME }}/
-
-      - name: Configure build
+      # 4. Подготовить feeds
+      - name: Prepare SDK feeds
         run: |
           cd openwrt-sdk
-          echo "CONFIG_PACKAGE_${{ env.PACKAGE_NAME }}=y" >> .config
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      # 5. Добавить пакет luci-app-fancontrol
+      - name: Add luci-app-fancontrol to SDK
+        run: |
+          cp -r ../fancontrol openwrt-sdk/package/luci-app-fancontrol
+          cd openwrt-sdk
+          echo "CONFIG_PACKAGE_luci-app-fancontrol=y" >> .config
           make defconfig
-          
-          echo "⚙️ Build configuration:"
-          grep "CONFIG_PACKAGE_${{ env.PACKAGE_NAME }}" .config || echo "Package not in config"
-          echo "✅ Build configured"
 
-      - name: Build package
+      # 6. Собрать пакет
+      - name: Build luci-app-fancontrol
         run: |
           cd openwrt-sdk
-          echo "🔧 Building ${{ env.PACKAGE_NAME }} for ${{ env.ARCH }}..."
-          make package/${{ env.PACKAGE_NAME }}/compile -j$(nproc)
-          echo "✅ Build completed successfully"
+          make package/luci-app-fancontrol/compile V=s -j$(nproc)
 
-      - name: Locate and verify IPK
-        id: locate_ipk
+      # 7. Найти собранный .ipk
+      - name: Find built .ipk
+        id: findipk
         run: |
           cd openwrt-sdk
-          
-          # Для qualcommax/ipq60xx с aarch64_cortex-a53
-          EXPECTED_PATH="bin/packages/${{ env.ARCH }}/base/${{ env.PACKAGE_NAME }}_*.ipk"
-          
-          echo "🔍 Looking for IPK at: $EXPECTED_PATH"
-          
-          if ! ls $EXPECTED_PATH >/dev/null 2>&1; then
-            echo "❌ IPK not found at expected path"
-            echo "📁 Searching in entire bin directory..."
-            find bin -name "*.ipk" -type f | head -10
-            echo "📂 Available package directories:"
-            find bin/packages -type d | head -15
-            exit 1
-          fi
-          
-          IPK_FILE=$(ls $EXPECTED_PATH | head -1)
-          IPK_BASENAME=$(basename "$IPK_FILE")
-          IPK_SIZE=$(du -h "$IPK_FILE" | cut -f1)
-          
-          # Copy to workspace root for release
-          cp "$IPK_FILE" "../$IPK_BASENAME"
-          
-          echo "file_name=$IPK_BASENAME" >> $GITHUB_OUTPUT
-          echo "file_path=$IPK_BASENAME" >> $GITHUB_OUTPUT
-          echo "architecture=${{ env.ARCH }}" >> $GITHUB_OUTPUT
-          echo "target=${{ env.TARGET }}-${{ env.SUBTARGET }}" >> $GITHUB_OUTPUT
-          
-          echo "✅ IPK located: $IPK_BASENAME"
-          echo "📊 Size: $IPK_SIZE"
-          echo "🏷️ Architecture: ${{ env.ARCH }}"
+          IPK_PATH=$(find bin/targets/ipq60xx/generic/packages/base/ -name "luci-app-fancontrol*.ipk")
+          echo "IPK_PATH=$IPK_PATH" >> $GITHUB_ENV
 
-      - name: Upload build artifact
+      # 8. Загрузить .ipk как артефакт Actions
+      - name: Upload .ipk as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.PACKAGE_NAME }}-${{ env.ARCH }}-${{ github.sha }}
-          path: ${{ steps.locate_ipk.outputs.file_path }}
-          retention-days: 7
-
-      - name: Create GitHub Release
-        if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' && format('nightly-{0}', github.sha) || github.ref_name }}
-          name: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' && format('Build {0} - {1}', github.sha, env.ARCH) || format('{0} - {1}', github.ref_name, env.ARCH) }}
-          draft: ${{ startsWith(github.ref, 'refs/tags/v') }}
-          prerelease: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
-          generate_release_notes: true
-          files: |
-            ${{ steps.locate_ipk.outputs.file_path }}
+          name: luci-app-fancontrol-ipk
+          path: ${{ env.IPK_PATH }}
