@@ -1,4 +1,4 @@
-name: Build luci-app-fancontrol for OpenWrt (qualcommax/ipq60xx)
+name: Build luci-app-fancontrol (OpenWrt SDK qualcommax/ipq60xx)
 
 on:
   push:
@@ -8,37 +8,66 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+
+    env:
+      SDK_URL: https://downloads.openwrt.org/snapshots/targets/qualcommax/ipq60xx/openwrt-sdk-qualcommax-ipq60xx_gcc-14.3.0_musl.Linux-x86_64.tar.zst
+      SDK_DIR: openwrt-sdk
+      PACKAGE_REPO: https://github.com/qlxi/luci-app-fancontrol.git
 
     steps:
-      - name: Checkout this repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Install build dependencies
         run: |
-          sudo apt update
-          sudo apt install -y build-essential libncurses5-dev gawk git wget unzip python3 zstd
+          sudo apt-get update -qq
+          sudo apt-get install -yqq build-essential clang llvm libncurses5-dev gawk git wget unzip python3 zstd
 
-      - name: Download OpenWrt SDK
+      - name: Cache OpenWrt SDK
+        id: cache-sdk
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.SDK_DIR }}
+          key: ${{ runner.os }}-openwrt-sdk-ipq60xx-${{ hashFiles('.github/workflows/build.yml') }}
+
+      - name: Download and extract SDK
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
         run: |
-          wget https://downloads.openwrt.org/snapshots/targets/qualcommax/ipq60xx/openwrt-sdk-qualcommax-ipq60xx_gcc-14.3.0_musl.Linux-x86_64.tar.zst
-          tar --zstd -xf openwrt-sdk-qualcommax-ipq60xx_gcc-14.3.0_musl.Linux-x86_64.tar.zst
-          mv openwrt-sdk-qualcommax-ipq60xx_gcc-14.3.0_musl.Linux-x86_64 openwrt-sdk
+          echo "Downloading OpenWrt SDK..."
+          wget -q $SDK_URL -O sdk.tar.zst
+          tar --zstd -xf sdk.tar.zst
+          mv openwrt-sdk-qualcommax-ipq60xx_*_Linux-x86_64 $SDK_DIR
 
-      - name: Clone luci-app-fancontrol source
+      - name: Clone luci-app-fancontrol sources
         run: |
-          git clone https://github.com/qlxi/luci-app-fancontrol.git source-luci-app-fancontrol
-          mkdir -p openwrt-sdk/package/
-          cp -r source-luci-app-fancontrol/luci-app-fancontrol/* openwrt-sdk/package/
+          git clone --depth 1 $PACKAGE_REPO source-luci-app-fancontrol
+          mkdir -p $SDK_DIR/package/
+          cp -r source-luci-app-fancontrol/luci-app-fancontrol/* $SDK_DIR/package/
 
-      - name: Build luci-app-fancontrol
-        working-directory: openwrt-sdk
+      - name: Prepare SDK configuration
+        working-directory: ${{ env.SDK_DIR }}
         run: |
-          make defconfig
-          make package/fancontrol/compile V=s
-          make package/luci-app-fancontrol/compile V=s
+          echo "Preparing SDK..."
+          make defconfig >/dev/null
 
-      - name: Upload built packages
+      - name: Build luci-app-fancontrol packages
+        working-directory: ${{ env.SDK_DIR }}
+        run: |
+          echo "Compiling fancontrol core..."
+          make -j$(nproc) package/fancontrol/compile V=s
+          echo "Compiling LuCI app..."
+          make -j$(nproc) package/luci-app-fancontrol/compile V=s
+
+      - name: Collect build artifacts
+        run: |
+          mkdir -p output
+          find $SDK_DIR/bin/packages/ -type f -name "*.ipk" -exec cp {} output/ \;
+
+      - name: Upload .ipk artifacts
         uses: actions/upload-artifact@v4
         with:
           name: luci-app-fancontrol-ipq60xx
-          path: openwrt-sdk/bin/packages/
+          path: output/
