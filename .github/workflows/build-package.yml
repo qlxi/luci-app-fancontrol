@@ -1,4 +1,4 @@
-name: Build luci-app-fancontrol (.ipk) only for IPQ60XX
+name: Build luci-app-fancontrol (.ipk) for IPQ60XX
 
 on:
   push:
@@ -10,7 +10,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 60
+    timeout-minutes: 90  # Добавляем таймаут для сборки
 
     steps:
       - name: Checkout this repository
@@ -35,95 +35,53 @@ jobs:
           cd openwrt/package
           git clone --depth=1 https://github.com/fanteral/luci-app-fancontrol.git
 
-      - name: Create minimal configuration for package build
+      - name: Configure target (IPQ60XX)
         run: |
           cd openwrt
-          cat > .config << 'EOF'
-CONFIG_TARGET_qualcommax=y
-CONFIG_TARGET_qualcommax_ipq60xx=y
-CONFIG_TARGET_qualcommax_ipq60xx_DEVICE_glinet_gl-axt1800=y
+          cat > .config << EOF
+CONFIG_TARGET_ipq60xx=y
+CONFIG_TARGET_ipq60xx_generic=y
 CONFIG_PACKAGE_luci-app-fancontrol=y
-# Основные зависимости для luci-app-fancontrol
-CONFIG_PACKAGE_fancontrol=y
-CONFIG_PACKAGE_luci-base=y
-CONFIG_PACKAGE_luci-compat=y
-CONFIG_PACKAGE_luci-lib-base=y
-CONFIG_PACKAGE_luci-lib-ip=y
-CONFIG_PACKAGE_luci-lib-jsonc=y
-CONFIG_PACKAGE_luci-lib-nixio=y
-CONFIG_PACKAGE_rpcd=y
-CONFIG_PACKAGE_rpcd-mod-luci=y
-CONFIG_PACKAGE_libubus-lua=y
-CONFIG_PACKAGE_liblua=y
-# Базовые системные утилиты
-CONFIG_PACKAGE_bash=y
-CONFIG_PACKAGE_coreutils=y
 EOF
-
-      - name: Configure build system
-        run: |
-          cd openwrt
           make defconfig
-          # Скачиваем только необходимые зависимости
-          make tools/install -j$(nproc)
-          make toolchain/install -j$(nproc)
 
-      - name: Download package dependencies
+      - name: Prepare build environment
         run: |
           cd openwrt
-          # Скачиваем исходники только для необходимых пакетов
-          make package/luci-app-fancontrol/download V=s
-          make package/fancontrol/download V=s
-          make package/luci-base/download V=s
+          make -j$(nproc) tools/install
+          make -j$(nproc) toolchain/install
 
-      - name: Prepare package dependencies
+      - name: Build luci-app-fancontrol
         run: |
           cd openwrt
-          # Подготавливаем зависимости
-          make package/luci-app-fancontrol/prepare V=s
-          make package/fancontrol/prepare V=s
-          make package/luci-base/prepare V=s
+          make package/luci-app-fancontrol/compile -j$(nproc) V=sc
 
-      - name: Build only luci-app-fancontrol with dependencies
-        run: |
-          cd openwrt
-          # Собираем только нужный пакет и его зависимости
-          make package/luci-app-fancontrol/compile -j$(nproc) V=s
-
-      - name: Find and collect built package
+      - name: Collect built packages
         id: collect
         run: |
           cd openwrt
           mkdir -p ../artifacts
-          
-          # Ищем собранный пакет
+          # Более надежный поиск пакетов
           find bin -name "luci-app-fancontrol_*.ipk" -type f -exec cp {} ../artifacts/ \;
-          find build_dir -name "luci-app-fancontrol_*.ipk" -type f -exec cp {} ../artifacts/ \;
-          find staging_dir -name "luci-app-fancontrol_*.ipk" -type f -exec cp {} ../artifacts/ \;
-          
-          # Если не нашли в стандартных местах, ищем везде
-          if [ -z "$(ls -A ../artifacts/*.ipk 2>/dev/null)" ]; then
-            echo "🔍 Searching for package in entire build directory..."
-            find . -name "luci-app-fancontrol_*.ipk" -type f -exec cp {} ../artifacts/ \;
-          fi
-          
-          if [ -z "$(ls -A ../artifacts/*.ipk 2>/dev/null)" ]; then
-            echo "❌ No luci-app-fancontrol package found!"
-            echo "Available IPK files:"
-            find . -name "*.ipk" -type f | head -20
+          echo "pkg_path=$(cd ../artifacts && ls *.ipk 2>/dev/null | tr '\n' ' ' || echo '')" >> $GITHUB_OUTPUT
+
+      - name: Check if package was built
+        id: check_package
+        run: |
+          if [ -z "$(ls -A artifacts/*.ipk 2>/dev/null)" ]; then
+            echo "❌ No .ipk files found!"
             exit 1
           else
-            echo "✅ Package built successfully:"
-            ls -la ../artifacts/
-            echo "pkg_path=$(cd ../artifacts && ls *.ipk | tr '\n' ' ')" >> $GITHUB_OUTPUT
+            echo "✅ Package built successfully"
+            echo "files=$(ls artifacts/*.ipk)" >> $GITHUB_OUTPUT
           fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: luci-app-fancontrol-ipk
+          name: luci-app-fancontrol-ipq60xx
           path: artifacts/
-          retention-days: 7
+          retention-days: 7  # Очистка старых артефактов
 
       - name: Publish release asset
         if: github.event_name == 'release'
