@@ -1,4 +1,4 @@
-name: Build luci-app-fancontrol (.ipk) for GL-AXT1800
+name: Build luci-app-fancontrol (.ipk) for IPQ60XX
 
 on:
   push:
@@ -34,12 +34,11 @@ jobs:
           cd openwrt/package
           git clone https://github.com/fanteral/luci-app-fancontrol.git luci-app-fancontrol
 
-      - name: Configure target (GL-AXT1800)
+      - name: Configure target (IPQ60XX)
         run: |
           cd openwrt
-          echo "CONFIG_TARGET_ipq807x=y" >> .config
-          echo "CONFIG_TARGET_ipq807x_generic=y" >> .config
-          echo "CONFIG_TARGET_ipq807x_generic_DEVICE_glinet_axt1800=y" >> .config
+          echo "CONFIG_TARGET_ipq60xx=y" >> .config
+          echo "CONFIG_TARGET_ipq60xx_generic=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-fancontrol=y" >> .config
           make defconfig
 
@@ -61,7 +60,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: luci-app-fancontrol-ipk
+          name: luci-app-fancontrol-ipq60xx
           path: artifacts/
 
       - name: Publish release asset
