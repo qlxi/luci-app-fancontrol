@@ -10,13 +10,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout this repository
         uses: actions/checkout@v4
 
       - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y build-essential libncurses5-dev gawk git wget unzip python3
+          sudo apt install -y build-essential libncurses5-dev gawk git wget unzip python3 zstd
 
       - name: Download OpenWrt SDK
         run: |
@@ -24,11 +24,11 @@ jobs:
           tar --zstd -xf openwrt-sdk-qualcommax-ipq60xx_gcc-14.3.0_musl.Linux-x86_64.tar.zst
           mv openwrt-sdk-qualcommax-ipq60xx_gcc-14.3.0_musl.Linux-x86_64 openwrt-sdk
 
-      - name: Prepare luci-app-fancontrol package
+      - name: Clone luci-app-fancontrol source
         run: |
-          unzip luci-app-fancontrol-main.zip -d ./tmp
+          git clone https://github.com/qlxi/luci-app-fancontrol.git source-luci-app-fancontrol
           mkdir -p openwrt-sdk/package/
-          cp -r ./tmp/luci-app-fancontrol-main/luci-app-fancontrol/* openwrt-sdk/package/
+          cp -r source-luci-app-fancontrol/luci-app-fancontrol/* openwrt-sdk/package/
 
       - name: Build luci-app-fancontrol
         working-directory: openwrt-sdk
